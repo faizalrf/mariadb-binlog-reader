@@ -2,6 +2,8 @@
 
 This tool is written in Python, scans all the Binary logs and generates a report containing all the DML/DDL operations.
 
+**Note:** _Don't try to execute this on live binlog, best to copy the files in some other server or a slave and process._
+
 ### List of arguments
 - Binary Log Path
   - This parameter locates the path of the MariaDB binary logs. Must not end with a "/"
