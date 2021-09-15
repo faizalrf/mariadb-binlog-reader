@@ -1,3 +1,9 @@
+#########################################################
+# Author: Faisal Saeed
+# Date: 15-Sep-2021
+# Desc: To scan binary logs and generate a usage report
+#########################################################
+
 import os
 import re
 import glob
