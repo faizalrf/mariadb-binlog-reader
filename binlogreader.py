@@ -77,6 +77,7 @@ def main():
     SearchAction = []
     SearchAction.append("CREATE TABLE ")
     SearchAction.append("DROP TABLE ")
+    SearchAction.append("ALTER TABLE ")
     SearchAction.append("### INSERT ")
     SearchAction.append("### UPDATE ")
     SearchAction.append("### DELETE ")
