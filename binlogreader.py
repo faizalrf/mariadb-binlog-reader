@@ -76,6 +76,7 @@ def main():
     #Prefine the Action Items to search for
     SearchAction = []
     SearchAction.append("CREATE TABLE ")
+    SearchAction.append("CREATE INDEX ")
     SearchAction.append("DROP TABLE ")
     SearchAction.append("ALTER TABLE ")
     SearchAction.append("### INSERT ")
