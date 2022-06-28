@@ -180,6 +180,11 @@ if [[ ${TargetDir: -1} != "/" ]]; then
    TargetDir="${TargetDir}/"      
 fi
 
+if [ ! -d ${TargetDir} ]; then
+   echo "Invalid MariaBackup path containing `xtrabackup_binlog_info` file..."
+   exit 1
+fi
+
 GenerateFileList
 
 ListGTID
