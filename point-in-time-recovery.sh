@@ -144,10 +144,6 @@ do
      BinLogPath=${VALUE};;
    "--find-gtid")
      GTID_To_Search=${VALUE};;
-   "--gtid-start")
-     GTID_Start=${VALUE};;
-   "--gtid-end")
-     GTID_End=${VALUE};;
    "--start-file")
      FirstFile=${VALUE};;
    "--end-file")
