@@ -57,43 +57,6 @@ ListGTID() {
    done
 }
 
-FindGTIDPosition() {
-   for file in ${FILES}
-   do
-      binlogFile=${BinLogPath}${file}
-      if [[ ${nextBinLogIsTheOne} == 2 ]]; then
-         if [[ ${binlogWithGTID} == ${file} ]]; then
-            mariadb-binlog ${binlogFile} | grep "GTID ${GTID_To_Search}" -B 1 > ${gtidPosition}
-            startPos=$(grep "# at " ${gtidPosition} | head -1 | grep -o -E '[0-9]+')
-            ret=$?
-            if [[ ${ret} == 0 ]]; then
-               echo "Start position ${startPos}"
-               echo "mariadb-binlog ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
-               continue
-            else
-               echo "Error reading GTID position..."
-               echo
-               exit 1
-            fi
-         fi
-      fi
-      echo "mariadb-binlog ${binlogFile} | mariadb" >> ${restoreScript}
-   done
-}
-
-GenerateRestoreScript() {
-   echo "GTID to search ${GTID_To_Search}"
-   if [ ${nextBinLogIsTheOne} -eq 1 ]; then
-      echo "Somthing!"
-   fi
-
-   for file in ${FILES}
-   do
-      # Find the Position of this new GTID
-      echo "Next Processing ${file}"
-   done
-}
-
 GenerateFileList() {
    if [[ ${FirstFile} > "0" ]]; then
       echo "First File ${FirstFile}"
@@ -125,6 +88,32 @@ GenerateFileList() {
    fi
 
    FILES=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+}
+
+FindGTIDPosition() {
+   for file in ${FILES}
+   do
+      binlogFile=${BinLogPath}${file}
+      if [[ ${nextBinLogIsTheOne} == 2 ]]; then
+         if [[ ${binlogWithGTID} == ${file} ]]; then
+            mariadb-binlog ${binlogFile} | grep "GTID ${GTID_To_Search}" -B 1 > ${gtidPosition}
+            startPos=$(grep "# at " ${gtidPosition} | head -1 | grep -o -E '[0-9]+')
+            ret=$?
+            if [[ ${ret} == 0 ]]; then
+               echo "Start position ${startPos}"
+               echo "mariadb-binlog ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
+               continue
+            else
+               echo "Error reading GTID position..."
+               echo
+               exit 1
+            fi
+         fi
+      fi
+      echo "mariadb-binlog ${binlogFile} | mariadb" >> ${restoreScript}
+   done
+   echo "Execute ${restoreScript} to restore the MariaDB database"
+   echo
 }
 
 HomePath=$(pwd)
