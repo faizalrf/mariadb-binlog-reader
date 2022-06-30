@@ -11,9 +11,43 @@ rm -f ${gtidSummary}
 binlogWithGTID=""
 nextBinLogIsTheOne=0
 restoreScript=/tmp/restore.sh
+binlogInfoFile=""
 echo "# Restore Script" > ${restoreScript}
 chmod 777 ${restoreScript}
-commandString="mariadb-binlog "
+commandString="${MBL} "
+
+GenerateFileList() {
+   if [[ ${FirstFile} > "0" ]]; then
+      echo "First File ${FirstFile}"
+   elif [ -d ${TargetDir} ]; then
+      if [ -f ${binlogInfoFile} ]; then
+         #Find the filenumber from the binlog file name in the xtrabackup_binlog_info
+         FirstFile=$(cat ${binlogInfoFile} | grep -o "${BinLogName}.[0-9]*" | awk -F"${BinLogName}." '{print $NF}')
+         FirstFile=$(expr ${FirstFile} + 0)
+         echo "First File ${FirstFile}"
+
+         GTID_To_Search=$(cat ${binlogInfoFile} | awk '{print $3}')
+      else
+         echo "Invalid backup directory path, xtrabackup_binlog_info file not found..."
+         exit 1
+      fi
+   fi
+   if [[ ${LastFile} > "0" ]]; then
+      echo "Last File ${LastFile}"
+      if [[ ${LastFile} < ${firstFile} ]]; then
+         echo "--end-file=${LastFile} must be higher than --start-file=${firstFile}, please check the arguments..."
+         echo "You may also want to validate the xtrabackup_binlog_info file for starting file position"
+         echo
+         exit 1
+      fi
+
+   else
+      LastFile=$(ls -nrt ${BinLogPath}${BinLogName}.[0-9]* | awk {'print $9'} | tail -1 | awk -F"${BinLogName}." '{print $NF}')
+      LastFile=$(expr ${LastFile} + 0)
+   fi
+
+   FILES=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+}
 
 ListGTID() {
    # Scan through all the files in the list
@@ -35,7 +69,7 @@ ListGTID() {
       fi
       echo "Reading ${binlogFile}"
 
-      mariadb-binlog ${binlogFile} | grep -n "GTID *[0-9]*-[0-9]*-[0-9]*" | grep "${GTID_To_Search}" -A 1 > ${gtidSummary}
+      ${MBL} ${binlogFile} | grep -n "GTID *[0-9]*-[0-9]*-[0-9]*" | grep "${GTID_To_Search}" -A 1 > ${gtidSummary}
       ret=$?
       # If any problem reading the GTID summary, exit 1
       if [[ ${ret} == 0 ]]; then
@@ -57,37 +91,31 @@ ListGTID() {
    done
 }
 
-GenerateFileList() {
-   if [[ ${FirstFile} > "0" ]]; then
-      echo "First File ${FirstFile}"
-   elif [ -d ${TargetDir} ]; then
-      if [ -f ${TargetDir}/xtrabackup_binlog_info ]; then
-         #Find the filenumber from the binlog file name in the xtrabackup_binlog_info
-         FirstFile=$(cat ${TargetDir}/xtrabackup_binlog_info | grep -o "${BinLogName}.[0-9]*" | awk -F"${BinLogName}." '{print $NF}')
-         FirstFile=$(expr ${FirstFile} + 0)
-         echo "First File ${FirstFile}"
+FindPositions() {
+   GenerateFileList
+   startPos=$(tail -1 ${binlogInfoFile} | awk -F ' ' '{print $2}')
+   firstPositionFound=0
 
-         GTID_To_Search=$(cat ${TargetDir}/xtrabackup_binlog_info | awk '{print $3}')
-      else
-         echo "Invalid backup directory path, `xtrabackup_binlog_info` file not found..."
-         exit 1
+   for file in ${FILES}
+   do
+      binlogFile=${BinLogPath}${file}
+      if [[ ${firstPositionFound} == 0 ]]; then
+         ${MBL} ${binlogFile} | grep "# at ${startPos}" > ${gtidPosition}
+         ret=$?
+         if [[ ${ret} == 0 ]]; then
+            echo "${MBL} ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
+            firstPositionFound=1
+            continue            
+         else
+            echo "Error reading File position..."
+            echo
+            exit 1         
+         fi
       fi
-   fi
-   if [[ ${LastFile} > "0" ]]; then
-      echo "Last File ${LastFile}"
-      if [[ ${LastFile} < ${firstFile} ]]; then
-         echo "--end-file=${LastFile} must be higher than --start-file=${firstFile}, please check the arguments..."
-         echo "You may also want to validate the xtrabackup_binlog_info file for starting file position"
-         echo
-         exit 1
-      fi
-
-   else
-      LastFile=$(ls -nrt ${BinLogPath}${BinLogName}.[0-9]* | awk {'print $9'} | tail -1 | awk -F"${BinLogName}." '{print $NF}')
-      LastFile=$(expr ${LastFile} + 0)
-   fi
-
-   FILES=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+      echo "${MBL} ${binlogFile} | mariadb" >> ${restoreScript}
+   done
+   echo "Execute ${restoreScript} to restore the MariaDB database"
+   echo
 }
 
 FindGTIDPosition() {
@@ -96,12 +124,12 @@ FindGTIDPosition() {
       binlogFile=${BinLogPath}${file}
       if [[ ${nextBinLogIsTheOne} == 2 ]]; then
          if [[ ${binlogWithGTID} == ${file} ]]; then
-            mariadb-binlog ${binlogFile} | grep "GTID ${GTID_To_Search}" -B 1 > ${gtidPosition}
+            ${MBL} ${binlogFile} | grep "GTID ${GTID_To_Search}" -B 1 > ${gtidPosition}
             startPos=$(grep "# at " ${gtidPosition} | head -1 | grep -o -E '[0-9]+')
             ret=$?
             if [[ ${ret} == 0 ]]; then
                echo "Start position ${startPos}"
-               echo "mariadb-binlog ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
+               echo "${MBL} ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
                continue
             else
                echo "Error reading GTID position..."
@@ -110,7 +138,7 @@ FindGTIDPosition() {
             fi
          fi
       fi
-      echo "mariadb-binlog ${binlogFile} | mariadb" >> ${restoreScript}
+      echo "${MBL} ${binlogFile} | mariadb" >> ${restoreScript}
    done
    echo "Execute ${restoreScript} to restore the MariaDB database"
    echo
@@ -141,16 +169,31 @@ do
      TargetDir=${VALUE};;
    "--datadir")
      DataDir=${VALUE};;
-   "--restore-mode")
-     LastFile=${VALUE};;
+   "--mode")
+     RestoreMode=${VALUE};;
    *)
      echo "Invalid arguments...";;
    esac
 done
 
-if [ ! -d ${BinLogPath} ]; then
-   echo "Invalid binlog path ${BinLogPath} !"
-   exit 0
+[[ -f $(which mysqlbinlog) ]] && MBL=$(which mysqlbinlog)
+[[ -f $(which mariadb-binlog) ]] && MBL=$(which mariadb-binlog)
+
+if [ ! -f ${MBL} ]; then
+   echo "mariadb-binlog / mysqlbinlog is not installed, please install MariaDB client"
+   exit 1
+fi
+
+echo "Using ${MBL}"
+
+if [ ! -d ${BinLogPath} ] || [ "${BinLogPath}" == "" ]; then
+   echo "Invalid binlog path --binlog-path=${BinLogPath} !"
+   exit 1
+fi
+
+if [ "${BinLogName}" == "" ]; then
+   "Please specify the binary log filename name --binlog-name"
+   exit 1
 fi
 
 if [[ ${BinLogPath} == "" ]]; then
@@ -161,19 +204,29 @@ if [[ ${BinLogPath: -1} != "/" ]]; then
    BinLogPath="${BinLogPath}/"      
 fi
 
-if [[ ${TargetDir: -1} != "/" ]]; then
-   TargetDir="${TargetDir}/"      
-fi
-
-if [ ! -d ${TargetDir} ]; then
-   echo "Invalid MariaBackup path containing `xtrabackup_binlog_info` file..."
+if [[ ${RestoreMode} != "position" && ${RestoreMode} != "gtid" ]]; then
+   echo "Invalid arguments..."
+   echo "Please use --mode=position or --mode=gtid"
    exit 1
 fi
 
-GenerateFileList
+if [[ ${TargetDir} != "" ]]; then
+   if [[ ${TargetDir: -1} != "/" ]]; then
+      TargetDir="${TargetDir}/"
+   fi
 
-ListGTID
+   binlogInfoFile=${TargetDir}xtrabackup_binlog_info
+   if [ ! -f ${binlogInfoFile} ]; then
+      echo "${binlogInfoFile} file not found..."
+      exit 1
+   fi
+fi
 
-FindGTIDPosition
-
+if [[ ${RestoreMode} == "position" ]]; then
+   FindPositions
+else
+   GenerateFileList
+   ListGTID
+   FindGTIDPosition
+fi
 exit 0
