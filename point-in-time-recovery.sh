@@ -12,7 +12,7 @@ binlogWithGTID=""
 nextBinLogIsTheOne=0
 restoreScript=/tmp/restore.sh
 binlogInfoFile=""
-echo "# Restore Script" > ${restoreScript}
+echo "# Restore Script $(date)\n" > ${restoreScript}
 chmod 777 ${restoreScript}
 commandString="${MBL} "
 
@@ -56,18 +56,17 @@ ListGTID() {
    do
       binlogFile=${BinLogPath}${file}
       # If Confirmed that next binary log is the one to be scanned from start then break this loop and continue
-      echo "GRID to search ${GTID_To_Search}"
-      if [ ${nextBinLogIsTheOne} -gt 0 ]; then
-         # Generate new Sequence and contunue 
-         FirstFile=${fileNumber}
-         FILES=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
-         break
-      fi
       if [ ! -f ${binlogFile} ]; then
          echo "${binlogFile} file not found!"
          continue
       fi
-      echo "Reading ${binlogFile}"
+      echo "Searching GTID=${GTID_To_Search} in ${binlogFile}"
+      if [ ${nextBinLogIsTheOne} -gt 0 ]; then
+         # Generate new Sequence and contunue
+         FirstFile=${fileNumber}
+         FILES=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+         break
+      fi
 
       ${MBL} ${binlogFile} | grep -n "GTID *[0-9]*-[0-9]*-[0-9]*" | grep "${GTID_To_Search}" -A 1 > ${gtidSummary}
       ret=$?
@@ -89,6 +88,13 @@ ListGTID() {
       fi
       ((fileNumber++))
    done
+   TestList=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$fileNumber"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+   if [ $? != 0 ]; then
+      echo "GTID ${GTID_To_Search} is the last one in the binary logs, nothing more to apply..."
+      echo "Aborting!"
+      echo
+      exit 1
+   fi
 }
 
 FindPositions() {
@@ -100,25 +106,28 @@ FindPositions() {
    do
       binlogFile=${BinLogPath}${file}
       if [[ ${firstPositionFound} == 0 ]]; then
+         echo "Searching for position=${startPos} in ${binlogFile}"
          ${MBL} ${binlogFile} | grep "# at ${startPos}" > ${gtidPosition}
          ret=$?
          if [[ ${ret} == 0 ]]; then
             echo "${MBL} ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
             firstPositionFound=1
-            continue            
-         else
-            echo "Error reading File position..."
-            echo
-            exit 1         
          fi
+         continue            
       fi
       echo "${MBL} ${binlogFile} | mariadb" >> ${restoreScript}
    done
-   echo "Execute ${restoreScript} to restore the MariaDB database"
-   echo
+   if [[ ${firstPositionFound} == 1 ]]; then 
+      echo "Execute ${restoreScript} to restore the MariaDB database"
+      echo
+   else
+      echo "Failed to find the position=${startPos} in any of the available binary logs"
+      exit 1
+   fi
 }
 
 FindGTIDPosition() {
+   firstPositionFound=0
    for file in ${FILES}
    do
       binlogFile=${BinLogPath}${file}
@@ -130,18 +139,22 @@ FindGTIDPosition() {
             if [[ ${ret} == 0 ]]; then
                echo "Start position ${startPos}"
                echo "${MBL} ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
-               continue
-            else
-               echo "Error reading GTID position..."
-               echo
-               exit 1
+               firstPositionFound=1
             fi
+            continue
          fi
       fi
+      [[ ${nextBinLogIsTheOne} == 1 ]] && firstPositionFound=1
+      
       echo "${MBL} ${binlogFile} | mariadb" >> ${restoreScript}
    done
-   echo "Execute ${restoreScript} to restore the MariaDB database"
-   echo
+   if [[ ${firstPositionFound} == 1 ]]; then 
+      echo "Execute ${restoreScript} to restore the MariaDB database"
+      echo
+   else
+      echo "Failed to find the GTID=${GTID_To_Search} in any of the available binary logs"
+      exit 1
+   fi
 }
 
 HomePath=$(pwd)
