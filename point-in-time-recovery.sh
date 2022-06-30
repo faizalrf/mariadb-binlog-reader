@@ -12,7 +12,7 @@ binlogWithGTID=""
 nextBinLogIsTheOne=0
 restoreScript=/tmp/restore.sh
 binlogInfoFile=""
-echo "# Restore Script $(date)\n" > ${restoreScript}
+echo "# Restore Script $(date)" > ${restoreScript}
 chmod 777 ${restoreScript}
 commandString="${MBL} "
 
@@ -45,8 +45,9 @@ GenerateFileList() {
       LastFile=$(ls -nrt ${BinLogPath}${BinLogName}.[0-9]* | awk {'print $9'} | tail -1 | awk -F"${BinLogName}." '{print $NF}')
       LastFile=$(expr ${LastFile} + 0)
    fi
-
-   FILES=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+   
+   # Files must be sorted! 
+   FILES=$(ls ${BinLogPath}${BinLogName}.*[0-9]* | sort | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
 }
 
 ListGTID() {
@@ -64,7 +65,7 @@ ListGTID() {
       if [ ${nextBinLogIsTheOne} -gt 0 ]; then
          # Generate new Sequence and contunue
          FirstFile=${fileNumber}
-         FILES=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+         FILES=$(ls ${BinLogPath}${BinLogName}.*[0-9]* | sort | awk -F '.' '{if ($2 >= '"$FirstFile"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
          break
       fi
 
@@ -88,7 +89,7 @@ ListGTID() {
       fi
       ((fileNumber++))
    done
-   TestList=$(ls -nrt ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$fileNumber"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
+   TestList=$(ls ${BinLogPath}${BinLogName}.*[0-9]* | awk -F '.' '{if ($2 >= '"$fileNumber"') print $0}' | awk -F '.' '{if ($2 <= '"$LastFile"') print $0}' | grep -o "${BinLogName}.*[0-9]*")
    if [ $? != 0 ]; then
       echo "GTID ${GTID_To_Search} is the last one in the binary logs, nothing more to apply..."
       echo "Aborting!"
@@ -133,28 +134,20 @@ FindGTIDPosition() {
       binlogFile=${BinLogPath}${file}
       if [[ ${nextBinLogIsTheOne} == 2 ]]; then
          if [[ ${binlogWithGTID} == ${file} ]]; then
-            ${MBL} ${binlogFile} | grep "GTID ${GTID_To_Search}" -B 1 > ${gtidPosition}
+            ${MBL} ${binlogFile} | grep "${GTID_To_Search}" -B 1 > ${gtidPosition}
             startPos=$(grep "# at " ${gtidPosition} | head -1 | grep -o -E '[0-9]+')
             ret=$?
             if [[ ${ret} == 0 ]]; then
                echo "Start position ${startPos}"
                echo "${MBL} ${binlogFile} --start-position=${startPos} | mariadb" >> ${restoreScript}
-               firstPositionFound=1
             fi
             continue
          fi
-      fi
-      [[ ${nextBinLogIsTheOne} == 1 ]] && firstPositionFound=1
-      
+      fi      
       echo "${MBL} ${binlogFile} | mariadb" >> ${restoreScript}
    done
-   if [[ ${firstPositionFound} == 1 ]]; then 
-      echo "Execute ${restoreScript} to restore the MariaDB database"
-      echo
-   else
-      echo "Failed to find the GTID=${GTID_To_Search} in any of the available binary logs"
-      exit 1
-   fi
+   echo "Execute ${restoreScript} to restore the MariaDB database"
+   echo
 }
 
 HomePath=$(pwd)
